@@ -1,0 +1,11 @@
+models:
+  bge-m3:
+    type: bge-m3
+    config:
+      model_name: BAAI/bge-m3
+      model_path: checkpoints/BAAI/bge-m3
+      use_fp16: true
+      device: cuda
+      normalize_embeddings: true
+      batch_size: 12
+      max_length: 8192
