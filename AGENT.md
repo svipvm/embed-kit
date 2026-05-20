@@ -1,5 +1,10 @@
 # EmbedKit 项目约束规范
 
+## 核心依赖
+- **pydantic-settings**: 配置管理（>= 2.0.0）
+- **fastapi**: Web 框架
+- **click**: CLI 工具
+
 ## 核心架构
 
 ### 模型处理器接口
@@ -9,49 +14,36 @@
 - 通过装饰器 `@registry.register_handler("name")` 注册
 
 ### 配置管理
-- 配置文件：`config/models.yaml`，必须包含 `model_name`, `model_path`, `batch_size`, `max_length`
-- 环境变量：`EMBED_KIT_SELECTED_MODEL`, `EMBED_KIT_MODELS_CONFIG_PATH`, `EMBED_KIT_HOST`, `EMBED_KIT_PORT`
-- `selected_model` 自动添加到配置中，供前端调用（如 `bge-m3`）
-- `model_name` 为实际模型路径（如 `BAAI/bge-m3`）
+使用 **pydantic-settings** 管理配置（`config/settings.yaml`），配置类位于 `src/embed_kit/utils/config.py`：
+
+```python
+settings = Settings.from_yaml("config/settings.yaml")
+model_config = settings.get_model_config("bge-m3")
+```
+
+**配置验证**：
+- 必需字段：`path`, `batch_size`, `max_length`
+- 自动验证：`batch_size >= 1`, `max_length >= 1`, 日志级别有效性
+- `name` 可选，缺失时从 `path` 自动推断
+
+**映射关系**：Model ID (配置键) ↔ Model Name (加载名称) → Model Instance
 
 ### API 端点
 OpenAI Embeddings API v1 兼容：
-- `GET /health` - 健康检查，返回 `selected_model`
+- `GET /health` - 健康检查
 - `POST /v1/embeddings` - 创建 dense embeddings
 - `POST /v1/embed_all` - 创建 dense + sparse embeddings
-- `GET /v1/models` - 列出模型，返回 `selected_model` 作为 ID
-
-### 请求格式
-```json
-{
-  "input": "text or array",
-  "model": "model-name",
-  "encoding_format": "float"
-}
-```
-
-### 响应格式
-```json
-{
-  "object": "list",
-  "data": [{
-    "object": "embedding",
-    "embedding": {"dense": [...], "sparse": {"indices": [...], "values": [...]}},
-    "index": 0
-  }],
-  "model": "model-name",
-  "usage": {"prompt_tokens": N, "total_tokens": N}
-}
-```
+- `GET /v1/models` - 列出模型
 
 ## CLI 命令
 ```bash
-embed-kit serve --model bge-m3 --config config/models.yaml --port 8000
-embed-kit test-model --model bge-m3 --config config/models.yaml
+embed-kit serve --host 0.0.0.0 --port 8000 --model bge-m3 --config config/settings.yaml
+embed-kit test-model --model bge-m3 --config config/settings.yaml
+embed-kit info [--config config/settings.yaml]
+embed-kit validate-config --config config/settings.yaml
 ```
 
 ## 开发规范
-- 所有配置项必须在 YAML 中明确指定，无代码默认值
-- 新模型必须实现 `BaseModelHandler` 接口并注册
-- 使用 Pydantic BaseModel 定义输入输出结构
-- 异步处理所有 I/O 操作
+- **配置管理**：使用 Pydantic Settings，配置项必须在 YAML 中明确指定或提供默认值
+- **模型开发**：实现 `BaseModelHandler` 接口并注册，使用 Pydantic BaseModel 定义输入输出
+- **代码规范**：使用类型注解，遵循 PEP 8，异步处理所有 I/O 操作

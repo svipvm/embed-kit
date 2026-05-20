@@ -1,34 +1,19 @@
 import asyncio
-import os
 import sys
 from pathlib import Path
 
 import click
-import yaml
 
-from embed_kit.models.registry import registry
+from embed_kit.models.adapters.registry import get_adapter_registry
+from embed_kit.utils.config import Settings
 from embed_kit.utils.logger import get_logger
 
 logger = get_logger("embed_kit.cli")
-
-APP_NAME = "EmbedKit"
-APP_VERSION = "0.1.0"
-DEFAULT_HOST = "0.0.0.0"
-DEFAULT_PORT = 8000
-DEFAULT_WORKERS = 1
-DEFAULT_MODELS_CONFIG_PATH = "config/models.yaml"
-DEFAULT_LOG_LEVEL = "INFO"
 
 
 def validate_port(ctx, param, value):
     if value < 1 or value > 65535:
         raise click.BadParameter(f"Port must be between 1 and 65535, got {value}")
-    return value
-
-
-def validate_workers(ctx, param, value):
-    if value < 1:
-        raise click.BadParameter(f"Workers must be at least 1, got {value}")
     return value
 
 
@@ -40,30 +25,24 @@ def validate_config_file(ctx, param, value):
         raise click.BadParameter(f"Configuration path is not a file: {value}")
     
     try:
-        with open(config_path) as f:
-            config_data = yaml.safe_load(f)
-            if not config_data:
-                raise click.BadParameter(f"Configuration file is empty: {value}")
-            if "models" not in config_data:
-                raise click.BadParameter(f"Configuration file missing 'models' section: {value}")
-    except yaml.YAMLError as e:
-        raise click.BadParameter(f"Invalid YAML format in configuration file: {e}")
+        Settings.from_yaml(config_path)
+    except Exception as e:
+        raise click.BadParameter(f"Invalid configuration file: {e}")
     
     return value
 
 
 @click.group()
-@click.version_option(version=APP_VERSION)
+@click.version_option(version="0.1.0")
 def cli() -> None:
     pass
 
 
 @cli.command()
-@click.option("--host", default=DEFAULT_HOST, help="Host to bind to")
-@click.option("--port", default=DEFAULT_PORT, type=int, callback=validate_port, help="Port to bind to")
-@click.option("--workers", default=DEFAULT_WORKERS, type=int, callback=validate_workers, help="Number of workers")
+@click.option("--host", required=True, help="Host to bind to")
+@click.option("--port", required=True, type=int, callback=validate_port, help="Port to bind to")
 @click.option("--reload", is_flag=True, help="Enable auto-reload (development mode)")
-@click.option("--log-level", default=DEFAULT_LOG_LEVEL, help="Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
+@click.option("--log-level", default="INFO", help="Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
 @click.option(
     "--model",
     required=True,
@@ -78,7 +57,6 @@ def cli() -> None:
 def serve(
     host: str,
     port: int,
-    workers: int,
     reload: bool,
     log_level: str,
     model: str,
@@ -86,21 +64,15 @@ def serve(
 ) -> None:
     import uvicorn
     
+    settings = Settings.from_yaml(config)
+    
+    APP_NAME = settings.app.name
+    APP_VERSION = settings.app.version
+    DEFAULT_LOG_LEVEL = settings.app.default_log_level
+    
     logger.info(f"Starting {APP_NAME} v{APP_VERSION}")
-    logger.info(f"Configuration: host={host}, port={port}, workers={workers}, model={model}")
+    logger.info(f"Configuration: host={host}, port={port}, model={model}")
     logger.debug(f"Config file: {config}")
-    
-    if reload and workers > 1:
-        logger.warning("Auto-reload is enabled, workers will be set to 1")
-        workers = 1
-    
-    os.environ["EMBED_KIT_APP_NAME"] = APP_NAME
-    os.environ["EMBED_KIT_APP_VERSION"] = APP_VERSION
-    os.environ["EMBED_KIT_HOST"] = host
-    os.environ["EMBED_KIT_PORT"] = str(port)
-    os.environ["EMBED_KIT_WORKERS"] = str(workers)
-    os.environ["EMBED_KIT_SELECTED_MODEL"] = model
-    os.environ["EMBED_KIT_MODELS_CONFIG_PATH"] = config
     
     valid_log_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
     log_level_upper = log_level.upper()
@@ -109,11 +81,18 @@ def serve(
         log_level_upper = DEFAULT_LOG_LEVEL
     
     try:
+        from embed_kit.main import create_app
+        app = create_app(
+            app_name=APP_NAME,
+            app_version=APP_VERSION,
+            selected_model=model,
+            config_path=config,
+        )
+        
         uvicorn.run(
-            "embed_kit.main:app",
+            app,
             host=host,
             port=port,
-            workers=workers,
             reload=reload,
             log_level=log_level_upper.lower(),
         )
@@ -135,35 +114,36 @@ def test_model(model: str, config: str) -> None:
         logger.info(f"Testing model: {model}")
         
         try:
-            with open(config) as f:
-                config_data = yaml.safe_load(f) or {}
-                models_config = config_data.get("models", {})
+            settings = Settings.from_yaml(config)
         except Exception as e:
             logger.error(f"Failed to read configuration file: {e}")
             click.echo(f"Error: Failed to read configuration file: {e}", err=True)
             return False
         
-        if model not in models_config:
-            available_models = list(models_config.keys())
-            logger.error(f"Model '{model}' not found in config")
-            click.echo(f"Error: Model '{model}' not found in config", err=True)
-            click.echo(f"Available models: {available_models}", err=True)
+        try:
+            model_config = settings.get_model_config(model)
+        except ValueError as e:
+            logger.error(str(e))
+            click.echo(f"Error: {e}", err=True)
             return False
         
-        model_config = models_config[model]
-        handler_type = model_config.get("type")
+        model_params = {
+            "model_path": model_config.path,
+            "model_name": model_config.get_model_name(),
+            "use_fp16": model_config.use_fp16,
+            "device": model_config.device,
+            "normalize_embeddings": model_config.normalize_embeddings,
+            "batch_size": model_config.batch_size,
+            "max_length": model_config.max_length,
+        }
         
-        if not handler_type:
-            logger.error(f"Model '{model}' has no 'type' field")
-            click.echo(f"Error: Model '{model}' has no 'type' field", err=True)
-            return False
-        
-        logger.debug(f"Loading model with config: {model_config.get('config', {})}")
+        logger.debug(f"Loading model with config: {model_params}")
         click.echo(f"Loading model: {model}")
         
         handler = None
         try:
-            handler = registry.create(handler_type, **model_config.get("config", {}))
+            from embed_kit.models.handler import create_model_handler
+            handler = create_model_handler(model, **model_params)
             await handler.initialize()
         except Exception as e:
             logger.error(f"Failed to load model: {e}")
@@ -179,7 +159,7 @@ def test_model(model: str, config: str) -> None:
         click.echo("✅ Model loaded successfully!")
         
         try:
-            from embed_kit.models.embedding import EmbeddingInput
+            from embed_kit.models.handler import EmbeddingInput
             
             test_input = EmbeddingInput(texts=["Hello, world!", "Test embedding"])
             result = await handler.process(test_input)
@@ -209,45 +189,48 @@ def test_model(model: str, config: str) -> None:
 @cli.command()
 @click.option(
     "--config",
-    required=True,
-    callback=validate_config_file,
-    help="Path to models config file",
+    help="Path to models config file (optional, shows models if provided)",
 )
-def list_models(config: str) -> None:
-    try:
-        with open(config) as f:
-            config_data = yaml.safe_load(f) or {}
-            models_config = config_data.get("models", {})
-        
-        click.echo("Available models:")
-        if not models_config:
-            click.echo("  No models found in configuration")
-            return
-        
-        for model_name, model_config in models_config.items():
-            handler_type = model_config.get("type", "unknown")
-            model_params = model_config.get("config", {})
-            model_name_in_config = model_params.get("model_name", "N/A")
-            
-            click.echo(f"\n  📦 {model_name}")
-            click.echo(f"     Type: {handler_type}")
-            click.echo(f"     Model: {model_name_in_config}")
-    except Exception as e:
-        logger.error(f"Failed to list models: {e}")
-        click.echo(f"Error: Failed to list models: {e}", err=True)
-        sys.exit(1)
-
-
-@cli.command()
-def list_handlers() -> None:
-    handlers = registry.list_handlers()
-    click.echo("Registered handlers:")
-    if not handlers:
-        click.echo("  No handlers registered")
-        return
+def info(config: str | None = None) -> None:
+    """Display system information: registered handlers and configured models"""
+    adapters = list(get_adapter_registry().keys())
+    click.echo("=" * 70)
+    click.echo("EmbedKit System Information")
+    click.echo("=" * 70)
     
-    for handler_name in handlers:
-        click.echo(f"  - {handler_name}")
+    click.echo("\n📋 Registered Adapters:")
+    if not adapters:
+        click.echo("  No adapters registered")
+    else:
+        for adapter_name in adapters:
+            click.echo(f"  • {adapter_name}")
+    
+    if config:
+        try:
+            config_path = Path(config)
+            if not config_path.exists():
+                click.echo(f"\n⚠️  Config file not found: {config}")
+                return
+            
+            settings = Settings.from_yaml(config)
+            
+            click.echo(f"\n📦 Configured Models ({config}):")
+            if not settings.models:
+                click.echo("  No models found in configuration")
+            else:
+                for model_id, model_config in settings.models.items():
+                    model_name = model_config.name or "N/A"
+                    model_path = model_config.path
+                    
+                    status = "✅"
+                    click.echo(f"\n  {status} {model_id}")
+                    click.echo(f"     Name: {model_name}")
+                    click.echo(f"     Path: {model_path}")
+        except Exception as e:
+            logger.error(f"Failed to read config: {e}")
+            click.echo(f"\n❌ Error reading config: {e}")
+    
+    click.echo("\n" + "=" * 70)
 
 
 @cli.command()
@@ -261,23 +244,12 @@ def validate_config(config: str) -> None:
     click.echo(f"✅ Configuration file is valid: {config}")
     
     try:
-        with open(config) as f:
-            config_data = yaml.safe_load(f) or {}
-            models_config = config_data.get("models", {})
+        settings = Settings.from_yaml(config)
         
-        click.echo(f"\nFound {len(models_config)} model(s):")
-        for model_name, model_config in models_config.items():
-            handler_type = model_config.get("type", "unknown")
-            model_params = model_config.get("config", {})
-            
-            required_params = ["model_name", "model_path", "batch_size", "max_length"]
-            missing_params = [p for p in required_params if p not in model_params]
-            
-            if missing_params:
-                click.echo(f"  ❌ {model_name} (type: {handler_type})")
-                click.echo(f"     Missing required parameters: {missing_params}")
-            else:
-                click.echo(f"  ✅ {model_name} (type: {handler_type})")
+        click.echo(f"\nFound {len(settings.models)} model(s):")
+        for model_id, model_config in settings.models.items():
+            model_name = model_config.name or "N/A"
+            click.echo(f"  ✅ {model_id} (name: {model_name})")
     except Exception as e:
         logger.error(f"Failed to validate configuration: {e}")
         click.echo(f"Error: Failed to validate configuration: {e}", err=True)

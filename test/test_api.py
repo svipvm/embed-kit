@@ -4,7 +4,7 @@ import sys
 import aiohttp
 
 
-async def test_api(base_url: str = "http://localhost:8001"):
+async def test_api(base_url: str = "http://localhost:8000"):
     print("=" * 70)
     print("BGE-M3 API 功能测试 (分离端点模式)")
     print("=" * 70)

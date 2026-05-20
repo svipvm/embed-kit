@@ -20,6 +20,7 @@
 - 💻 CLI 一键启动
 - ⚙️ YAML 配置文件管理
 - 🎯 支持 Dense 和 Sparse Embeddings
+- 🔒 Pydantic Settings 配置验证
 
 ## 安装
 
@@ -33,7 +34,7 @@ cd embed-kit
 # 安装 PyTorch（CUDA 12.8）
 uv pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 --index-url https://download.pytorch.org/whl/cu128
 
-# 安装项目依赖
+# 安装项目依赖（包含 pydantic-settings）
 uv sync
 ```
 
@@ -49,19 +50,16 @@ pip install -e .
 
 ```bash
 # 基本启动（使用 bge-m3 模型）
-uv run embed-kit serve --model bge-m3 --config config/models.yaml
+uv run embed-kit serve --host 0.0.0.0 --port 8000 --model bge-m3 --config config/settings.yaml
 
 # 指定端口
-uv run embed-kit serve --model bge-m3 --config config/models.yaml --port 8080
+uv run embed-kit serve --host 0.0.0.0 --port 8080 --model bge-m3 --config config/settings.yaml
 
 # 开发模式（自动重载）
-uv run embed-kit serve --model bge-m3 --config config/models.yaml --reload
-
-# 多进程模式
-uv run embed-kit serve --model bge-m3 --config config/models.yaml --workers 4
+uv run embed-kit serve --host 0.0.0.0 --port 8000 --model bge-m3 --config config/settings.yaml --reload
 
 # 指定日志级别
-uv run embed-kit serve --model bge-m3 --config config/models.yaml --log-level DEBUG
+uv run embed-kit serve --host 0.0.0.0 --port 8000 --model bge-m3 --config config/settings.yaml --log-level DEBUG
 ```
 
 ### 2. Docker 启动
@@ -78,7 +76,7 @@ docker-compose up embed-kit-dev
 
 ```bash
 source .venv/bin/activate
-python -m embed_kit.cli serve --model bge-m3 --config config/models.yaml
+python -m embed_kit.cli serve --host 0.0.0.0 --port 8000 --model bge-m3 --config config/settings.yaml
 ```
 
 ## CLI 命令
@@ -86,40 +84,39 @@ python -m embed_kit.cli serve --model bge-m3 --config config/models.yaml
 ### serve - 启动服务
 
 ```bash
-uv run embed-kit serve --model <model-name> --config <config-file> [OPTIONS]
+uv run embed-kit serve --host <host> --port <port> --model <model-name> --config <config-file> [OPTIONS]
 
-选项:
-  --host TEXT              绑定主机 [默认: 0.0.0.0]
-  --port INTEGER           绑定端口 [默认: 8000]
-  --workers INTEGER        工作进程数 [默认: 1]
+必需参数:
+  --host TEXT              绑定主机
+  --port INTEGER           绑定端口
+  --model TEXT             模型名称
+  --config TEXT            配置文件路径
+
+可选参数:
   --reload                 启用自动重载（开发模式）
   --log-level TEXT         日志级别 [默认: INFO]
-  --model TEXT             模型名称 [必需]
-  --config TEXT            配置文件路径 [必需]
 ```
 
 ### test-model - 测试模型
 
 ```bash
-uv run embed-kit test-model --model bge-m3 --config config/models.yaml
+uv run embed-kit test-model --model bge-m3 --config config/settings.yaml
 ```
 
-### list-models - 列出可用模型
+### info - 显示系统信息
 
 ```bash
-uv run embed-kit list-models --config config/models.yaml
-```
+# 显示已注册的处理器
+uv run embed-kit info
 
-### list-handlers - 列出已注册处理器
-
-```bash
-uv run embed-kit list-handlers
+# 显示处理器和配置的模型
+uv run embed-kit info --config config/settings.yaml
 ```
 
 ### validate-config - 验证配置文件
 
 ```bash
-uv run embed-kit validate-config --config config/models.yaml
+uv run embed-kit validate-config --config config/settings.yaml
 ```
 
 ## API 调用
@@ -258,27 +255,114 @@ asyncio.run(get_embeddings())
 
 ## 配置
 
-### 模型配置文件 (config/models.yaml)
+使用 **pydantic-settings** 进行配置管理，提供类型安全和自动验证功能。
+
+### 配置文件 (config/settings.yaml)
 
 ```yaml
+app:
+  name: EmbedKit              # 应用名称
+  version: 0.1.0              # 应用版本
+  default_log_level: INFO     # 默认日志级别
+
 models:
-  bge-m3:
-    type: bge-m3
-    config:
-      model_name: BAAI/bge-m3        # 模型名称
-      model_path: checkpoints/BAAI/bge-m3  # 模型路径
-      use_fp16: true                  # 使用 FP16 加速
-      device: cuda                    # 设备类型 (cuda/cpu)
-      normalize_embeddings: true      # 归一化 embeddings
-      batch_size: 12                  # 批处理大小
-      max_length: 8192                # 最大序列长度
+  bge-m3:                          # Model ID（后端定位模型）
+    name: BAAI/bge-m3              # Model Name（前端调用和实际加载）
+    path: checkpoints/BAAI/bge-m3  # 模型文件路径
+    use_fp16: true                  # 使用 FP16 加速
+    device: cuda                    # 设备类型 (cuda/cpu)
+    normalize_embeddings: true      # 归一化 embeddings
+    batch_size: 12                  # 批处理大小
+    max_length: 8192                # 最大序列长度
 ```
 
-**重要配置项说明:**
-- `model_name`: 实际模型名称（如 BAAI/bge-m3）
-- `model_path`: 模型文件路径
-- `batch_size`: 批处理大小，根据 GPU 内存调整
-- `max_length`: 最大序列长度，BGE-M3 支持 8192
+### 配置管理特性
+
+- **类型安全**: 使用 Pydantic 进行严格的类型检查和验证
+- **自动验证**: 字段验证、必填检查、类型转换自动完成
+- **易于扩展**: 添加新配置项只需在配置类中添加字段
+- **IDE 支持**: Pydantic 模型有良好的 IDE 自动补全支持
+
+### 配置说明
+
+#### 应用配置 (`app`)
+- `name`: 应用名称，显示在健康检查和日志中
+- `version`: 应用版本，用于版本管理和 API 响应
+- `default_log_level`: 默认日志级别（DEBUG, INFO, WARNING, ERROR, CRITICAL）
+
+#### 模型配置 (`models`)
+- **Model ID** (`bge-m3`): 配置键名，用于 CLI 参数和 API 调用
+- **Model Name** (`name`): 实际模型名称，用于加载模型（如 `BAAI/bge-m3`）
+- **Model Path** (`path`): 模型文件路径（必需）
+- `batch_size`: 批处理大小，根据 GPU 内存调整（必需，>= 1）
+- `max_length`: 最大序列长度（必需，>= 1）
+- `use_fp16`: 使用 FP16 加速（默认 true）
+- `device`: 设备类型 cuda/cpu（默认 cuda）
+- `normalize_embeddings`: 归一化 embeddings（默认 true）
+
+如果省略 `name`，会自动从 `path` 推断（如 `checkpoints/BAAI/bge-m3` → `BAAI/bge-m3`）
+
+### 配置使用示例
+
+```python
+from embed_kit.utils.config import Settings
+
+# 加载配置
+settings = Settings.from_yaml("config/settings.yaml")
+
+# 访问应用配置
+print(f"App: {settings.app.name} v{settings.app.version}")
+print(f"Log Level: {settings.app.default_log_level}")
+
+# 访问模型配置
+model_config = settings.get_model_config("bge-m3")
+print(f"Model: {model_config.get_model_name()}")
+print(f"Path: {model_config.path}")
+print(f"Batch Size: {model_config.batch_size}")
+print(f"Max Length: {model_config.max_length}")
+```
+
+**多模型配置示例:**
+
+```yaml
+app:
+  name: EmbedKit
+  version: 0.1.0
+  default_log_level: INFO
+
+models:
+  bge-m3:
+    name: BAAI/bge-m3
+    path: checkpoints/BAAI/bge-m3
+    use_fp16: true
+    device: cuda
+    normalize_embeddings: true
+    batch_size: 12
+    max_length: 8192
+  
+  bge-large-zh:
+    name: BAAI/bge-large-zh-v1.5
+    path: checkpoints/BAAI/bge-large-zh-v1.5
+    use_fp16: true
+    device: cuda
+    normalize_embeddings: true
+    batch_size: 32
+    max_length: 512
+  
+  e5-large:
+    path: checkpoints/intfloat/e5-large-v2  # name 会自动推断为 intfloat/e5-large-v2
+    use_fp16: true
+    device: cuda
+    normalize_embeddings: true
+    batch_size: 32
+    max_length: 512
+```
+
+**映射关系:**
+```
+Model ID (CLI/API)  ↔  Model Name (加载)  →  Model Instance
+     bge-m3         ↔     BAAI/bge-m3     →  BGEM3Handler
+```
 
 ## 测试
 
@@ -286,7 +370,7 @@ models:
 
 ```bash
 # 启动服务
-uv run embed-kit serve --model bge-m3 --config config/models.yaml --port 8001
+uv run embed-kit serve --host 0.0.0.0 --port 8001 --model bge-m3 --config config/settings.yaml
 
 # 运行测试（另一个终端）
 source .venv/bin/activate
@@ -316,9 +400,10 @@ embed-kit/
 │   │   ├── routes.py        # OpenAI 兼容路由
 │   │   └── schemas.py       # 请求/响应模型
 │   └── utils/               # 工具函数
+│       ├── config.py        # 配置管理（pydantic-settings）
 │       └── logger.py        # 日志配置
 ├── config/
-│   └── models.yaml          # 模型配置
+│   └── settings.yaml        # 应用配置
 ├── test/
 │   └── test_api.py          # API 测试脚本
 ├── Dockerfile
@@ -328,21 +413,31 @@ embed-kit/
 └── README.md
 ```
 
-## 环境变量
-
-服务启动时会设置以下环境变量：
-
-- `EMBED_KIT_APP_NAME` - 应用名称
-- `EMBED_KIT_APP_VERSION` - 应用版本
-- `EMBED_KIT_SELECTED_MODEL` - 选择的模型
-- `EMBED_KIT_MODELS_CONFIG_PATH` - 配置文件路径
-- `EMBED_KIT_HOST` - 服务主机
-- `EMBED_KIT_PORT` - 服务端口
-- `EMBED_KIT_WORKERS` - 工作进程数
-
 ## 扩展开发
 
+### 添加新模型
+
 详见 [AGENT.md](AGENT.md) 了解如何添加自定义模型处理器。
+
+### 修改配置
+
+配置文件使用 Pydantic Settings 管理，修改配置时：
+
+1. **修改配置文件** (`config/settings.yaml`)
+   - 添加新的模型配置
+   - 修改应用参数
+
+2. **扩展配置类** (如需要新字段)
+   - 在 `src/embed_kit/utils/config.py` 中添加字段
+   - Pydantic 会自动验证新字段
+
+3. **使用配置**
+   ```python
+   from embed_kit.utils.config import Settings
+   
+   settings = Settings.from_yaml("config/settings.yaml")
+   # 访问配置项
+   ```
 
 ## 许可证
 

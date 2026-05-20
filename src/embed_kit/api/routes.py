@@ -10,7 +10,7 @@ from embed_kit.api.schemas import (
     SparseEmbedding,
     UsageInfo,
 )
-from embed_kit.models.base import BaseModelHandler
+from embed_kit.models.handler.base import BaseModelHandler
 from embed_kit.utils.logger import get_logger
 
 logger = get_logger("embed_kit.api.routes")
@@ -43,7 +43,7 @@ async def create_embeddings(
         texts = [request.input] if isinstance(request.input, str) else request.input
         logger.info(f"Creating embeddings for {len(texts)} texts, model={request.model}")
 
-        from embed_kit.models.embedding import EmbeddingInput
+        from embed_kit.models.handler import EmbeddingInput
 
         embedding_input = EmbeddingInput(
             texts=texts,
@@ -90,9 +90,8 @@ async def create_embeddings_all(
         batch_size = handler.config["batch_size"]
         max_length = handler.config["max_length"]
 
-        result = await handler.generate_embeddings_all(
+        result = await handler.encode_multi(
             texts=texts,
-            model=request.model,
             batch_size=batch_size,
             max_length=max_length,
             return_sparse=True,
@@ -100,11 +99,13 @@ async def create_embeddings_all(
 
         data = []
         for i, dense_emb in enumerate(result.dense_embeddings):
-            sparse_dict = result.sparse_embeddings[i] if result.sparse_embeddings else {}
-            sparse_emb = SparseEmbedding(
-                indices=list(sparse_dict.keys()),
-                values=list(sparse_dict.values()),
-            )
+            sparse_emb = SparseEmbedding()
+            if result.sparse_embeddings and i < len(result.sparse_embeddings):
+                sparse_obj = result.sparse_embeddings[i]
+                sparse_emb = SparseEmbedding(
+                    indices=sparse_obj.indices,
+                    values=sparse_obj.values,
+                )
 
             embedding_data = EmbeddingData(
                 dense=dense_emb,
@@ -146,9 +147,8 @@ async def create_sparse_embeddings(
         batch_size = handler.config["batch_size"]
         max_length = handler.config["max_length"]
 
-        result = await handler.generate_embeddings_all(
+        result = await handler.encode_multi(
             texts=texts,
-            model=request.model,
             batch_size=batch_size,
             max_length=max_length,
             return_sparse=True,
@@ -156,10 +156,10 @@ async def create_sparse_embeddings(
 
         data = []
         if result.sparse_embeddings:
-            for i, sparse_dict in enumerate(result.sparse_embeddings):
+            for i, sparse_obj in enumerate(result.sparse_embeddings):
                 sparse_emb = SparseEmbedding(
-                    indices=list(sparse_dict.keys()),
-                    values=list(sparse_dict.values()),
+                    indices=sparse_obj.indices,
+                    values=sparse_obj.values,
                 )
                 embedding_data = EmbeddingData(
                     dense=[],
@@ -192,7 +192,7 @@ async def create_sparse_embeddings(
 async def list_models() -> dict[str, Any]:
     logger.debug("Listing available models")
     handler = get_model_handler()
-    model_id = handler.config.get("selected_model", handler.config.get("model_name", "unknown"))
+    model_id = getattr(handler, "model_id", handler.config.get("model_name", "unknown"))
     return {
         "object": "list",
         "data": [

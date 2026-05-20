@@ -1,0 +1,14 @@
+app:
+  name: EmbedKit
+  version: 0.2.0
+  default_log_level: INFO
+
+models:
+  bge-m3:
+    name: BAAI/bge-m3
+    path: checkpoints/BAAI/bge-m3
+    use_fp16: true
+    device: cuda
+    normalize_embeddings: true
+    batch_size: 12
+    max_length: 8192
