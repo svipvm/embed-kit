@@ -61,6 +61,10 @@ class EmbeddingAdapter(ABC):
     ) -> list[list[float]]:
         pass
 
+    @abstractmethod
+    def count_tokens(self, texts: list[str]) -> int:
+        pass
+
     async def encode_multi(
         self,
         texts: list[str],

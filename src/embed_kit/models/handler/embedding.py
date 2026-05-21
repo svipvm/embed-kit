@@ -93,7 +93,7 @@ class EmbeddingModelHandler(BaseModelHandler[EmbeddingInput, DenseEmbeddingOutpu
         await super().shutdown()
     
     def count_tokens(self, texts: list[str]) -> int:
-        return sum(len(text.split()) for text in texts)
+        return self._adapter.count_tokens(texts)
 
 
 def create_model_handler(model_id: str, **config: Any) -> EmbeddingModelHandler:

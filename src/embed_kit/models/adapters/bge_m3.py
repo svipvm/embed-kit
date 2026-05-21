@@ -89,3 +89,15 @@ class BGEM3Adapter(EmbeddingAdapter):
             dimensions=dimensions,
             num_texts=len(dense_embeddings),
         )
+
+    def count_tokens(self, texts: list[str]) -> int:
+        if not self._initialized or self._model is None:
+            raise RuntimeError(f"Model not initialized: {self.model_name}")
+        
+        total_tokens = 0
+        tokenizer = self._model.tokenizer
+        for text in texts:
+            tokens = tokenizer.encode(text)
+            total_tokens += len(tokens)
+        
+        return total_tokens
