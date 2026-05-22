@@ -54,6 +54,11 @@ def cli() -> None:
     callback=validate_config_file,
     help="Path to models config file",
 )
+@click.option(
+    "--api-key",
+    default=None,
+    help="API key for authentication (optional, if not set, no authentication required)",
+)
 def serve(
     host: str,
     port: int,
@@ -61,6 +66,7 @@ def serve(
     log_level: str,
     model: str,
     config: str,
+    api_key: str | None,
 ) -> None:
     import uvicorn
     
@@ -87,6 +93,7 @@ def serve(
             app_version=APP_VERSION,
             selected_model=model,
             config_path=config,
+            api_key=api_key,
         )
         
         uvicorn.run(

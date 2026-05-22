@@ -16,6 +16,7 @@ class AppConfig(BaseModel):
     app_version: str = Field(..., description="Application version")
     selected_model: str = Field(..., description="Selected model name")
     config_path: str = Field(..., description="Configuration file path")
+    api_key: str | None = Field(None, description="API key for authentication")
 
 
 def _load_selected_model(config: AppConfig) -> Any:
@@ -90,6 +91,7 @@ def create_app(
     app_version: str = "0.1.0",
     selected_model: str | None = None,
     config_path: str | None = None,
+    api_key: str | None = None,
 ) -> FastAPI:
     if not selected_model:
         raise ValueError(
@@ -107,6 +109,7 @@ def create_app(
         app_version=app_version,
         selected_model=selected_model,
         config_path=config_path,
+        api_key=api_key,
     )
     
     logger.info(f"Creating FastAPI app: {config.app_name} v{config.app_version}")
@@ -121,7 +124,8 @@ def create_app(
     
     app.state.config = config
     
-    from embed_kit.api.routes import router
+    from embed_kit.api.routes import router, set_api_key
+    set_api_key(config.api_key)
     app.include_router(router, prefix="/v1")
     
     @app.get("/")

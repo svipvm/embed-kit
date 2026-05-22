@@ -1,6 +1,7 @@
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from embed_kit.api.schemas import (
     EmbeddingData,
@@ -18,6 +19,41 @@ logger = get_logger("embed_kit.api.routes")
 router = APIRouter()
 
 _model_handler: BaseModelHandler | None = None
+_api_key: str | None = None
+
+security = HTTPBearer(auto_error=False)
+
+
+def set_api_key(api_key: str | None) -> None:
+    global _api_key
+    _api_key = api_key
+    if api_key:
+        logger.info("API key authentication enabled")
+    else:
+        logger.info("API key authentication disabled")
+
+
+def verify_api_key(
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+) -> None:
+    if _api_key is None:
+        return
+    
+    if credentials is None:
+        logger.warning("Missing Authorization header")
+        raise HTTPException(
+            status_code=401,
+            detail="Missing Authorization header",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    if credentials.credentials != _api_key:
+        logger.warning("Invalid API key")
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid API key",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 
 def get_model_handler() -> BaseModelHandler:
@@ -38,6 +74,7 @@ def set_model_handler(handler: BaseModelHandler) -> None:
 async def create_embeddings(
     request: EmbeddingRequest,
     handler: BaseModelHandler = Depends(get_model_handler),
+    _: None = Depends(verify_api_key),
 ) -> EmbeddingResponse:
     try:
         texts = [request.input] if isinstance(request.input, str) else request.input
@@ -82,6 +119,7 @@ async def create_embeddings(
 async def create_embeddings_all(
     request: EmbeddingRequest,
     handler: BaseModelHandler = Depends(get_model_handler),
+    _: None = Depends(verify_api_key),
 ) -> EmbeddingResponse:
     try:
         texts = [request.input] if isinstance(request.input, str) else request.input
@@ -139,6 +177,7 @@ async def create_embeddings_all(
 async def create_sparse_embeddings(
     request: EmbeddingRequest,
     handler: BaseModelHandler = Depends(get_model_handler),
+    _: None = Depends(verify_api_key),
 ) -> EmbeddingResponse:
     try:
         texts = [request.input] if isinstance(request.input, str) else request.input
@@ -189,7 +228,9 @@ async def create_sparse_embeddings(
 
 
 @router.get("/models")
-async def list_models() -> dict[str, Any]:
+async def list_models(
+    _: None = Depends(verify_api_key),
+) -> dict[str, Any]:
     logger.debug("Listing available models")
     handler = get_model_handler()
     model_id = getattr(handler, "model_id", handler.config.get("model_name", "unknown"))
