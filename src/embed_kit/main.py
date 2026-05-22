@@ -1,5 +1,3 @@
-import signal
-import sys
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator
 
@@ -73,16 +71,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             except Exception as shutdown_error:
                 logger.error(f"Error during shutdown: {shutdown_error}")
         raise
-    
-    shutdown_event = False
-    
-    def signal_handler(signum, frame):
-        nonlocal shutdown_event
-        logger.info(f"Received signal {signum}, initiating graceful shutdown")
-        shutdown_event = True
-    
-    signal.signal(signal.SIGTERM, signal_handler)
-    signal.signal(signal.SIGINT, signal_handler)
     
     try:
         yield
